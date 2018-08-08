@@ -28,10 +28,12 @@ var (
 	logErr  = Common.ErrorLog
 	logInfo = Common.InfoLog
 )
+var db *sql.DB
 
 func init() {
 	Common.Init(os.Stdout)
 	Common.SetLogDir(logDir)
+
 }
 
 type Order struct {
@@ -45,22 +47,7 @@ type OrderInfo struct {
 	Status   string `json:"status"`
 }
 
-type Rest struct {
-	//	sync.Mutex
-	db *sql.DB
-}
-
-func (this *Rest) Init() error {
-	var err error
-	this.db, err = sql.Open("mysql", "orderserver:abc123456@tcp(localhost:3306)/orderserver?charset=utf8")
-	if err != nil {
-		return err
-	}
-	this.db.SetMaxOpenConns(100)
-	return nil
-}
-
-func (this *Rest) GetDistance(order Order) (int, error) {
+func GetDistance(order Order) (int, error) {
 	if 2 != len(order.Origin) || 2 != len(order.Destination) {
 		logErr("Request data invalid: ", order)
 		return -1, fmt.Errorf("Request data invalid: %s", order)
@@ -102,8 +89,8 @@ func (this *Rest) GetDistance(order Order) (int, error) {
 }
 
 // Save order info to DB, and return order_id
-func (this *Rest) SaveOrder2DB(order Order, distance int) (int64, error) {
-	stmt, err := this.db.Prepare(
+func SaveOrder2DB(order Order, distance int) (int64, error) {
+	stmt, err := db.Prepare(
 		"INSERT INTO t_orders SET origin=?,destination=?,distance=?")
 	if err != nil {
 		logErr("db prepare failed:", err)
@@ -126,8 +113,8 @@ func (this *Rest) SaveOrder2DB(order Order, distance int) (int64, error) {
 	return id, nil
 }
 
-func (this *Rest) TakeOrder(orderid string) error {
-	stmt, err := this.db.Prepare(`SELECT id,status FROM t_orders WHERE id=? AND status=?`)
+func TakeOrder(orderid string) error {
+	stmt, err := db.Prepare(`SELECT id,status FROM t_orders WHERE id=? AND status=?`)
 	if err != nil {
 		logErr("db prepare failed:", err)
 		return err
@@ -142,7 +129,7 @@ func (this *Rest) TakeOrder(orderid string) error {
 	defer rows.Close()
 
 	for rows.Next() {
-		stmt, err := this.db.Prepare("UPDATE t_orders SET status=? WHERE id=? AND status=?")
+		stmt, err := db.Prepare("UPDATE t_orders SET status=? WHERE id=? AND status=?")
 		if err != nil {
 			logErr("db prepare failed:", err)
 			return err
@@ -162,10 +149,10 @@ func (this *Rest) TakeOrder(orderid string) error {
 	return fmt.Errorf("order requested not exists or has been taken")
 }
 
-func (this *Rest) ListOrder(page, limit string) *[]OrderInfo {
+func ListOrder(page, limit string) *[]OrderInfo {
 	orderList := []OrderInfo{}
 	for {
-		stmt, err := this.db.Prepare(`SELECT id,distance,status FROM t_orders LIMIT ? OFFSET ?`)
+		stmt, err := db.Prepare(`SELECT id,distance,status FROM t_orders LIMIT ? OFFSET ?`)
 		if err != nil {
 			logErr("db prepare failed:", err)
 			break
@@ -204,9 +191,8 @@ func (this *Rest) ListOrder(page, limit string) *[]OrderInfo {
 	return &orderList
 }
 
-func (this *Rest) NewOrderHandler(w http.ResponseWriter, r *http.Request) {
+func NewOrderHandler(w http.ResponseWriter, r *http.Request) {
 	defer Common.CheckPanic()
-	defer r.Body.Close()
 	logInfo(fmt.Sprintf("client: %s, url: %s, method: %s\n", r.RemoteAddr, r.RequestURI, r.Method))
 	for {
 		if "POST" != r.Method {
@@ -227,13 +213,13 @@ func (this *Rest) NewOrderHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		distance, err := this.GetDistance(order)
+		distance, err := GetDistance(order)
 		if err != nil {
 			logErr("Get Distance failed")
 			break
 		}
 
-		order_id, err := this.SaveOrder2DB(order, distance)
+		order_id, err := SaveOrder2DB(order, distance)
 		if err != nil {
 			logErr("Save order failed:", err)
 			break
@@ -256,9 +242,8 @@ func (this *Rest) NewOrderHandler(w http.ResponseWriter, r *http.Request) {
 	logErr("Order failed")
 }
 
-func (this *Rest) TakeOrderHandler(w http.ResponseWriter, r *http.Request) {
+func TakeOrderHandler(w http.ResponseWriter, r *http.Request) {
 	defer Common.CheckPanic()
-	defer r.Body.Close()
 	logInfo("client:", r.RemoteAddr, "url:", r.RequestURI, "method:", r.Method)
 	for {
 		if "PUT" != r.Method {
@@ -280,7 +265,7 @@ func (this *Rest) TakeOrderHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		orderId := path.Base(r.URL.Path)
-		if err := this.TakeOrder(orderId); err != nil {
+		if err := TakeOrder(orderId); err != nil {
 			logErr("TakeOrder failed:", err)
 			break
 		}
@@ -293,9 +278,8 @@ func (this *Rest) TakeOrderHandler(w http.ResponseWriter, r *http.Request) {
 	logErr("Take order failed")
 }
 
-func (this *Rest) ListOrderHandler(w http.ResponseWriter, r *http.Request) {
+func ListOrderHandler(w http.ResponseWriter, r *http.Request) {
 	defer Common.CheckPanic()
-	defer r.Body.Close()
 	logInfo("client:", r.RemoteAddr, "url:", r.RequestURI, "method:", r.Method)
 
 	for {
@@ -304,8 +288,14 @@ func (this *Rest) ListOrderHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		page, limit := r.FormValue("page"), r.FormValue("limit")
+		if page == "" {
+			page = "0"
+		}
+		if limit == "" {
+			limit = "1"
+		}
 		logInfo("page:", page, "limit:", limit)
-		res_data := this.ListOrder(page, limit)
+		res_data := ListOrder(page, limit)
 		data, err := json.MarshalIndent(res_data, "", "  ")
 		if err != nil {
 			logErr("Json Marshal data failed:", err)
@@ -321,15 +311,19 @@ func (this *Rest) ListOrderHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	log.SetFlags(log.Ldate | log.Lshortfile)
 
-	fmt.Println("server listen:", port, " begin ...")
-	var rest Rest
-	if err := rest.Init(); err != nil {
-		fmt.Println(err)
+	var err error
+	db, err = sql.Open("mysql", "orderserver:abc123456@tcp(localhost:3306)/orderserver?charset=utf8")
+	if err != nil {
+		logErr("sql open failed:", err)
 		return
 	}
+	defer db.Close()
+	db.SetMaxOpenConns(100)
 
-	http.HandleFunc("/order", rest.NewOrderHandler)
-	http.HandleFunc("/order/", rest.TakeOrderHandler)
-	http.HandleFunc("/orders", rest.ListOrderHandler)
-	fmt.Println(http.ListenAndServe(port, nil))
+	logInfo("server listen:", port, " begin ...")
+
+	http.HandleFunc("/order", NewOrderHandler)
+	http.HandleFunc("/order/", TakeOrderHandler)
+	http.HandleFunc("/orders", ListOrderHandler)
+	logErr(http.ListenAndServe(port, nil))
 }
