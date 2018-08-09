@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	db, _ = sql.Open("mysql", "orderserver:abc123456@tcp(localhost:3306)/orderserver?charset=utf8")
+	db, _ = sql.Open("mysql", "root:abc123456@tcp(127.0.0.1:3306)/orderserver?charset=utf8")
 }
 
 func TestListOrderHandler(t *testing.T) {
