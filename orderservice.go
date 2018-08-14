@@ -312,7 +312,7 @@ func main() {
 	log.SetFlags(log.Ldate | log.Lshortfile)
 
 	var err error
-	db, err = sql.Open("mysql", "root:abc123456@tcp(127.0.0.1:3306)/orderserver?charset=utf8")
+	db, err = sql.Open("mysql", "root:abc123456@tcp(mysql:3306)/orderserver?charset=utf8")
 	if err != nil {
 		logErr("sql open failed:", err)
 		return
