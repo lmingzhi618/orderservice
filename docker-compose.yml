@@ -1,4 +1,7 @@
 version: "3"
+#volumes:
+#  db_data:
+
 services:
   web:
     # replace username/repo:tag with your name and image details
@@ -15,19 +18,23 @@ services:
       - "8080:8080"
     networks:
       - webnet
-
+  
   mysql:
-     image: mysql
+     image: mysql_order
      ports:
        - "3306:3306"
+     volumes:
+      #- "db_data:/var/lib/mysql"
+       - "/db_data:/var/lib/mysql"
+       - "./db:/mnt/db"
      # 环境变量
      environment:
         - MYSQL_ROOT_PASSWORD=abc123456
         - MYSQL_DATABASE=orderservice
-     container_name: "mysql_order"
      deploy:
        placement:
          constraints: [node.role == manager]
+     command: "sh /mnt/db/localdb.sh"
      networks:
         - webnet
 
