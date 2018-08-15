@@ -1,0 +1,35 @@
+version: "3"
+services:
+  web:
+    # replace username/repo:tag with your name and image details
+    image: mingzhi198/orderservice
+    deploy:
+      replicas: 5
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 50M
+    ports:
+      - "8080:8080"
+    networks:
+      - webnet
+
+  mysql:
+     image: mysql
+     ports:
+       - "3306:3306"
+     # 环境变量
+     environment:
+        - MYSQL_ROOT_PASSWORD=abc123456
+        - MYSQL_DATABASE=orderservice
+     container_name: "mysql_order"
+     deploy:
+       placement:
+         constraints: [node.role == manager]
+     networks:
+        - webnet
+
+networks:
+  webnet:
